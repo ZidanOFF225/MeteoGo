@@ -1,4 +1,5 @@
 import { StatusBar } from 'expo-status-bar';
+import * as Location from 'expo-location';
 import {
   ActivityIndicator,
   Image,
@@ -27,6 +28,7 @@ export default function App() {
   const [recentCities, setRecentCities] = useState(['Abidjan', 'Paris', 'Dakar']);
   const [suggestions, setSuggestions] = useState([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [locating, setLocating] = useState(false);
 
   // Auto-complétion : va chercher des villes correspondant au texte saisi
   useEffect(() => {
@@ -116,6 +118,60 @@ export default function App() {
     }
   };
 
+  const fetchWeatherByCoords = async (lat, lon) => {
+    if (!API_KEY) {
+      setError('Ajoutez votre clé OpenWeatherMap dans EXPO_PUBLIC_OWM_KEY.');
+      setData(null);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const url = `${BASE_URL}?lat=${lat}&lon=${lon}&units=metric&lang=fr&appid=${API_KEY}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Erreur lors de la récupération de la météo.");
+      const json = await res.json();
+      setData(json);
+      setCity(json?.name || '');
+      setLastUpdated(new Date());
+      setRecentCities((prev) => {
+        const label = json?.name || '';
+        if (!label) return prev;
+        const next = [label, ...prev.filter((c) => c.toLowerCase() !== label.toLowerCase())];
+        return next.slice(0, 6);
+      });
+    } catch (e) {
+      setData(null);
+      setError(e.message || 'Erreur');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUseLocation = async () => {
+    if (!API_KEY) {
+      setError('Ajoutez votre clé OpenWeatherMap dans EXPO_PUBLIC_OWM_KEY.');
+      return;
+    }
+    setError(null);
+    setLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setError('Autorise la géolocalisation pour utiliser cette fonction.');
+        return;
+      }
+      const position = await Location.getCurrentPositionAsync({});
+      const { latitude, longitude } = position.coords;
+      await fetchWeatherByCoords(latitude, longitude);
+      setSuggestions([]);
+    } catch (e) {
+      setError('Impossible de récupérer ta position.');
+    } finally {
+      setLocating(false);
+    }
+  };
+
   const weatherIcon = data?.weather?.[0]?.icon;
   const description = data?.weather?.[0]?.description;
   const temp = data?.main?.temp;
@@ -166,6 +222,16 @@ export default function App() {
               <Text style={styles.buttonText}>{loading ? '...' : 'Go'}</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={[styles.locBtn, (loading || locating) && styles.buttonDisabled]}
+            onPress={handleUseLocation}
+            disabled={loading || locating}
+          >
+            <Text style={styles.locText}>
+              {locating ? 'Localisation…' : 'Utiliser ma position'}
+            </Text>
+          </TouchableOpacity>
 
           {/* Liste déroulante des villes suggérées */}
           {!!city.trim() && suggestions.length > 0 && (
@@ -374,6 +440,18 @@ const styles = StyleSheet.create({
     color: '#0f172a',
     fontWeight: '700',
     fontSize: 16,
+  },
+  locBtn: {
+    backgroundColor: '#0ea5e9',
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: -4,
+    marginBottom: 12,
+  },
+  locText: {
+    color: '#0b1220',
+    fontWeight: '800',
   },
   linkBtn: {
     alignSelf: 'flex-start',
