@@ -12,10 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 const API_KEY = process.env.EXPO_PUBLIC_OWM_KEY || '';
 const BASE_URL = 'https://api.openweathermap.org/data/2.5/weather';
+const GEO_URL = 'https://api.openweathermap.org/geo/1.0/direct';
 
 export default function App() {
   const [city, setCity] = useState('');
@@ -24,6 +25,57 @@ export default function App() {
   const [data, setData] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
   const [recentCities, setRecentCities] = useState(['Abidjan', 'Paris', 'Dakar']);
+  const [suggestions, setSuggestions] = useState([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  // Auto-complétion : va chercher des villes correspondant au texte saisi
+  useEffect(() => {
+    const q = city.trim();
+    if (!q || q.length < 2 || !API_KEY) {
+      setSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timeout = setTimeout(async () => {
+      setLoadingSuggestions(true);
+      try {
+        const url = `${GEO_URL}?q=${encodeURIComponent(q)}&limit=5&appid=${API_KEY}`;
+        const res = await fetch(url);
+        if (!res.ok) {
+          setSuggestions([]);
+          return;
+        }
+        const json = await res.json();
+        if (!cancelled) {
+          // Supprime les doublons par label complet
+          const seen = new Set();
+          const mapped = [];
+          for (const c of json || []) {
+            const label = `${c.name}${c.state ? ', ' + c.state : ''}${c.country ? ' (' + c.country + ')' : ''}`;
+            if (seen.has(label)) continue;
+            seen.add(label);
+            mapped.push({
+              label,
+              name: c.name,
+              country: c.country,
+              state: c.state,
+            });
+          }
+          setSuggestions(mapped);
+        }
+      } catch {
+        if (!cancelled) setSuggestions([]);
+      } finally {
+        if (!cancelled) setLoadingSuggestions(false);
+      }
+    }, 300); // petit debounce
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timeout);
+    };
+  }, [city, API_KEY]);
 
   const fetchWeather = async (cityOverride) => {
     Keyboard.dismiss();
@@ -114,6 +166,31 @@ export default function App() {
               <Text style={styles.buttonText}>{loading ? '...' : 'Go'}</Text>
             </TouchableOpacity>
           </View>
+
+          {/* Liste déroulante des villes suggérées */}
+          {!!city.trim() && suggestions.length > 0 && (
+            <View style={styles.suggestionsBox}>
+              {suggestions.map((s, idx) => (
+                <TouchableOpacity
+                  key={`${s.label}-${idx}`}
+                  style={styles.suggestionItem}
+                  onPress={() => {
+                    setCity(s.name);
+                    setSuggestions([]);
+                    fetchWeather(s.name);
+                  }}
+                  disabled={loading}
+                >
+                  <Text style={styles.suggestionText}>{s.label}</Text>
+                </TouchableOpacity>
+              ))}
+              {loadingSuggestions && (
+                <View style={styles.suggestionFooter}>
+                  <ActivityIndicator size="small" color="#60a5fa" />
+                </View>
+              )}
+            </View>
+          )}
 
           {!!city && (
             <TouchableOpacity
@@ -252,6 +329,28 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
     marginBottom: 16,
+  },
+  suggestionsBox: {
+    backgroundColor: '#020617',
+    borderRadius: 10,
+    borderColor: '#1f2937',
+    borderWidth: 1,
+    marginTop: -8,
+    marginBottom: 12,
+    overflow: 'hidden',
+  },
+  suggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomColor: '#1f2937',
+    borderBottomWidth: 1,
+  },
+  suggestionText: {
+    color: '#e5e7eb',
+  },
+  suggestionFooter: {
+    paddingVertical: 6,
+    alignItems: 'center',
   },
   input: {
     flex: 1,
